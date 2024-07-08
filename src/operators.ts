@@ -2,35 +2,35 @@ import { MetaMethods, Table } from './Table'
 import { coerceToNumber, coerceToString, LuaType, coerceToBoolean } from './utils'
 import { LuaError } from './LuaError'
 
-const binaryArithmetic = <R extends boolean | number>(
+const binaryArithmetic = async <R extends boolean | number>(
     left: LuaType,
     right: LuaType,
     metaMethodName: MetaMethods,
     callback: (l: number, r: number) => R
-): R => {
+): Promise<R> => {
     const mm =
-        (left instanceof Table && left.getMetaMethod(metaMethodName)) ||
-        (right instanceof Table && right.getMetaMethod(metaMethodName))
-    if (mm) return mm(left, right)[0]
+        (left instanceof Table && await left.getMetaMethod(metaMethodName)) ||
+        (right instanceof Table && await right.getMetaMethod(metaMethodName))
+    if (mm) return (await mm(left, right))[0]
 
     const L = coerceToNumber(left, 'attempt to perform arithmetic on a %type value')
     const R = coerceToNumber(right, 'attempt to perform arithmetic on a %type value')
-    return callback(L, R)
+    return await callback(L, R)
 }
 
-const binaryBooleanArithmetic = (
+const binaryBooleanArithmetic = async (
     left: LuaType,
     right: LuaType,
     metaMethodName: MetaMethods,
     callback: (l: LuaType, r: LuaType) => boolean
-): boolean => {
+): Promise<boolean> => {
     if (
         (typeof left === 'string' && typeof right === 'string') ||
         (typeof left === 'number' && typeof right === 'number')
     ) {
-        return callback(left, right)
+        return await callback(left, right)
     }
-    return binaryArithmetic<boolean>(left, right, metaMethodName, callback)
+    return await binaryArithmetic<boolean>(left, right, metaMethodName, callback)
 }
 
 // extra
@@ -43,24 +43,24 @@ const or = (l: LuaType, r: LuaType): LuaType => coerceToBoolean(l) ? l : r
 // unary
 const not = (value: LuaType): boolean => !bool(value)
 
-const unm = (value: LuaType): number => {
-    const mm = value instanceof Table && value.getMetaMethod('__unm')
-    if (mm) return mm(value)[0]
+const unm = async (value: LuaType): Promise<number> => {
+    const mm = value instanceof Table && await value.getMetaMethod('__unm')
+    if (mm) return (await mm(value))[0]
 
     return -1 * coerceToNumber(value, 'attempt to perform arithmetic on a %type value')
 }
 
-const bnot = (value: LuaType): number => {
-    const mm = value instanceof Table && value.getMetaMethod('__bnot')
-    if (mm) return mm(value)[0]
+const bnot = async (value: LuaType): Promise<number> => {
+    const mm = value instanceof Table && await value.getMetaMethod('__bnot')
+    if (mm) return (await mm(value))[0]
 
     return ~coerceToNumber(value, 'attempt to perform arithmetic on a %type value')
 }
 
-const len = (value: LuaType): number => {
+const len = async (value: LuaType): Promise<number> => {
     if (value instanceof Table) {
-        const mm = value.getMetaMethod('__len')
-        if (mm) return mm(value)[0]
+        const mm = await value.getMetaMethod('__len')
+        if (mm) return (await mm(value))[0]
 
         return value.getn()
     }
@@ -81,13 +81,13 @@ const len = (value: LuaType): number => {
 }
 
 // binary
-const add = (left: LuaType, right: LuaType): number => binaryArithmetic(left, right, '__add', (l, r) => l + r)
+const add = (left: LuaType, right: LuaType): Promise<number> => binaryArithmetic(left, right, '__add', (l, r) => l + r)
 
-const sub = (left: LuaType, right: LuaType): number => binaryArithmetic(left, right, '__sub', (l, r) => l - r)
+const sub = (left: LuaType, right: LuaType): Promise<number> => binaryArithmetic(left, right, '__sub', (l, r) => l - r)
 
-const mul = (left: LuaType, right: LuaType): number => binaryArithmetic(left, right, '__mul', (l, r) => l * r)
+const mul = (left: LuaType, right: LuaType): Promise<number> => binaryArithmetic(left, right, '__mul', (l, r) => l * r)
 
-const mod = (left: LuaType, right: LuaType): number =>
+const mod = (left: LuaType, right: LuaType): Promise<number> =>
     binaryArithmetic(left, right, '__mod', (l, r) => {
         if (r === 0 || r === -Infinity || r === Infinity || isNaN(l) || isNaN(r)) return NaN
 
@@ -100,63 +100,63 @@ const mod = (left: LuaType, right: LuaType): number =>
         return result
     })
 
-const pow = (left: LuaType, right: LuaType): number => binaryArithmetic(left, right, '__pow', Math.pow)
+const pow = (left: LuaType, right: LuaType): Promise<number> => binaryArithmetic(left, right, '__pow', Math.pow)
 
-const div = (left: LuaType, right: LuaType): number =>
+const div = (left: LuaType, right: LuaType): Promise<number> =>
     binaryArithmetic(left, right, '__div', (l, r) => {
         if (r === undefined) throw new LuaError('attempt to perform arithmetic on a nil value')
         return l / r
     })
 
-const idiv = (left: LuaType, right: LuaType): number =>
+const idiv = (left: LuaType, right: LuaType): Promise<number> =>
     binaryArithmetic(left, right, '__idiv', (l, r) => {
         if (r === undefined) throw new LuaError('attempt to perform arithmetic on a nil value')
         return Math.floor(l / r)
     })
 
-const band = (left: LuaType, right: LuaType): number => binaryArithmetic(left, right, '__band', (l, r) => l & r)
+const band = (left: LuaType, right: LuaType): Promise<number> => binaryArithmetic(left, right, '__band', (l, r) => l & r)
 
-const bor = (left: LuaType, right: LuaType): number => binaryArithmetic(left, right, '__bor', (l, r) => l | r)
+const bor = (left: LuaType, right: LuaType): Promise<number> => binaryArithmetic(left, right, '__bor', (l, r) => l | r)
 
-const bxor = (left: LuaType, right: LuaType): number => binaryArithmetic(left, right, '__bxor', (l, r) => l ^ r)
+const bxor = (left: LuaType, right: LuaType): Promise<number> => binaryArithmetic(left, right, '__bxor', (l, r) => l ^ r)
 
-const shl = (left: LuaType, right: LuaType): number => binaryArithmetic(left, right, '__shl', (l, r) => l << r)
+const shl = (left: LuaType, right: LuaType): Promise<number> => binaryArithmetic(left, right, '__shl', (l, r) => l << r)
 
-const shr = (left: LuaType, right: LuaType): number => binaryArithmetic(left, right, '__shr', (l, r) => l >> r)
+const shr = (left: LuaType, right: LuaType): Promise<number> => binaryArithmetic(left, right, '__shr', (l, r) => l >> r)
 
-const concat = (left: LuaType, right: LuaType): string => {
+const concat = async (left: LuaType, right: LuaType): Promise<string> => {
     const mm =
-        (left instanceof Table && left.getMetaMethod('__concat')) ||
-        (right instanceof Table && right.getMetaMethod('__concat'))
-    if (mm) return mm(left, right)[0]
+        (left instanceof Table && await left.getMetaMethod('__concat')) ||
+        (right instanceof Table && await right.getMetaMethod('__concat'))
+    if (mm) return (await mm(left, right))[0]
 
     const L = coerceToString(left, 'attempt to concatenate a %type value')
     const R = coerceToString(right, 'attempt to concatenate a %type value')
     return `${L}${R}`
 }
 
-const neq = (left: LuaType, right: LuaType): boolean => !eq(left, right)
+const neq = async (left: LuaType, right: LuaType): Promise<boolean> => !await eq(left, right)
 
-const eq = (left: LuaType, right: LuaType): boolean => {
+const eq = async (left: LuaType, right: LuaType): Promise<boolean> => {
     const mm =
         right !== left &&
         left instanceof Table &&
         right instanceof Table &&
         left.metatable === right.metatable &&
-        left.getMetaMethod('__eq')
+        await left.getMetaMethod('__eq')
 
-    if (mm) return !!mm(left, right)[0]
+    if (mm) return !!(await mm(left, right))[0]
 
     return left === right
 }
 
-const lt = (left: LuaType, right: LuaType): boolean => binaryBooleanArithmetic(left, right, '__lt', (l, r) => l < r)
+const lt = (left: LuaType, right: LuaType): Promise<boolean> => binaryBooleanArithmetic(left, right, '__lt', (l, r) => l < r)
 
-const le = (left: LuaType, right: LuaType): boolean => binaryBooleanArithmetic(left, right, '__le', (l, r) => l <= r)
+const le = (left: LuaType, right: LuaType): Promise<boolean> => binaryBooleanArithmetic(left, right, '__le', (l, r) => l <= r)
 
-const gt = (left: LuaType, right: LuaType): boolean => !le(left, right)
+const gt = async (left: LuaType, right: LuaType): Promise<boolean> => !await le(left, right)
 
-const ge = (left: LuaType, right: LuaType): boolean => !lt(left, right)
+const ge = async (left: LuaType, right: LuaType): Promise<boolean> => !await lt(left, right)
 
 const operators = {
     bool,

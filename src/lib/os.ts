@@ -1,6 +1,6 @@
-import { Table } from '../Table'
-import { LuaType, Config, coerceArgToNumber } from '../utils'
-import { LuaError } from '../LuaError'
+import {Table} from '../Table'
+import {LuaType, Config, coerceArgToNumber} from '../utils'
+import {LuaError} from '../LuaError'
 
 const DAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const MONTHS = [
@@ -74,7 +74,7 @@ const DATE_FORMAT_HANDLERS: Record<Format, (date: Date, utc: boolean) => string>
     I: (date, utc) => `0${(utc ? date.getUTCHours() : date.getHours()) % 12 || 12}`.substr(-2),
     M: (date, utc) => `0${utc ? date.getUTCMinutes() : date.getMinutes()}`.substr(-2),
     S: (date, utc) => `0${utc ? date.getUTCSeconds() : date.getSeconds()}`.substr(-2),
-    c: (date, utc) => date.toLocaleString(undefined, utc ? { timeZone: 'UTC' } : undefined),
+    c: (date, utc) => date.toLocaleString(undefined, utc ? {timeZone: 'UTC'} : undefined),
     x: (date, utc) => {
         const m = DATE_FORMAT_HANDLERS.m(date, utc)
         const d = DATE_FORMAT_HANDLERS.d(date, utc)
@@ -143,16 +143,16 @@ function setlocale(locale = 'C'): string {
     // TODO: implement fully
 }
 
-function time(table?: Table): number {
+async function time(table?: Table): Promise<number> {
     let now = Math.round(Date.now() / 1000)
     if (!table) return now
 
-    const year = table.rawget('year') as number
-    const month = table.rawget('month') as number
-    const day = table.rawget('day') as number
-    const hour = (table.rawget('hour') as number) || 12
-    const min = table.rawget('min') as number
-    const sec = table.rawget('sec') as number
+    const year = await table.rawget('year') as number
+    const month = await table.rawget('month') as number
+    const day = await table.rawget('day') as number
+    const hour = (await table.rawget('hour') as number) || 12
+    const min = await table.rawget('min') as number
+    const sec = await table.rawget('sec') as number
     // const isdst = table.rawget('isdst') as boolean
 
     if (year) now += year * 31557600
@@ -190,4 +190,4 @@ const getLibOS = (cfg: Config): Table => {
     })
 }
 
-export { getLibOS }
+export {getLibOS}

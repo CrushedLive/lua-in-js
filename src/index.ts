@@ -1,27 +1,27 @@
 /* eslint-disable import/order */
 /* eslint-disable import/no-duplicates */
-import { Scope } from './Scope'
-import { createG } from './lib/globals'
-import { operators } from './operators'
-import { Table } from './Table'
-import { LuaError } from './LuaError'
-import { libMath } from './lib/math'
-import { libTable } from './lib/table'
-import { libString, metatable as stringMetatable } from './lib/string'
-import { getLibOS } from './lib/os'
-import { getLibPackage } from './lib/package'
-import { LuaType, ensureArray, Config } from './utils'
-import { parse as parseScript } from './parser'
+import {Scope} from './Scope'
+import {createG} from './lib/globals'
+import {operators} from './operators'
+import {Table} from './Table'
+import {LuaError} from './LuaError'
+import {libMath} from './lib/math'
+import {libTable} from './lib/table'
+import {libString, metatable as stringMetatable} from './lib/string'
+import {getLibOS} from './lib/os'
+import {getLibPackage} from './lib/package'
+import {LuaType, ensureArray, Config} from './utils'
+import {parse as parseScript} from './parser'
 
 interface Script {
-    exec: () => LuaType
+    exec: () => Promise<LuaType>
 }
 
-const call = (f: Function | Table, ...args: LuaType[]): LuaType[] => {
-    if (f instanceof Function) return ensureArray(f(...args))
+const call = async (f: Function | Table, ...args: LuaType[]): Promise<LuaType[]> => {
+    if (f instanceof Function) return ensureArray(await f(...args))
 
-    const mm = f instanceof Table && f.getMetaMethod('__call')
-    if (mm) return ensureArray(mm(f, ...args))
+    const mm = f instanceof Table && await f.getMetaMethod('__call')
+    if (mm) return ensureArray(await mm(f, ...args))
 
     throw new LuaError(`attempt to call an uncallable type`)
 }
@@ -29,34 +29,36 @@ const call = (f: Function | Table, ...args: LuaType[]): LuaType[] => {
 const stringTable = new Table()
 stringTable.metatable = stringMetatable
 
-const get = (t: Table | string, v: LuaType): LuaType => {
-    if (t instanceof Table) return t.get(v)
-    if (typeof t === 'string') return stringTable.get(v)
+const get = async (t: Table | string, v: LuaType): Promise<LuaType> => {
+    if (t instanceof Table) return await t.get(v)
+    if (typeof t === 'string') return await stringTable.get(v)
 
     throw new LuaError(`no table or metatable found for given type`)
 }
 
-const execChunk = (_G: Table, chunk: string, chunkName?: string): LuaType[] => {
+const execChunk = async (_G: Table, chunk: string, chunkName?: string): Promise<LuaType[]> => {
+    // console.log('\n\n\n\n=================\n', chunk, '\n=================\n\n\n\n')
     const exec = new Function('__lua', chunk)
     const globalScope = new Scope(_G.strValues).extend()
     if (chunkName) globalScope.setVarargs([chunkName])
-    const res = exec({
+    const asyncFn = exec({
         globalScope,
         ...operators,
         Table,
         call,
         get
-    })
+    }) as () => Promise<LuaType[]>
+    const res = await asyncFn()
     return res === undefined ? [undefined] : res
 }
 
-function createEnv(
+async function createEnv(
     config: Config = {}
-): {
+): Promise<{
     parse: (script: string) => Script
-    parseFile: (path: string) => Script
-    loadLib: (name: string, value: Table) => void
-} {
+    parseFile: (path: string) => Promise<Script>
+    loadLib: (name: string, value: Table) => Promise<void>
+}> {
     const cfg: Config = {
         LUA_PATH: './?.lua',
         stdin: '',
@@ -64,42 +66,42 @@ function createEnv(
         ...config
     }
 
-    const _G = createG(cfg, execChunk)
+    const _G = await createG(cfg, execChunk)
 
-    const { libPackage, _require } = getLibPackage(
-        (content, moduleName) => execChunk(_G, parseScript(content), moduleName)[0],
+    const {libPackage, _require} = getLibPackage(
+        async (content, moduleName) => (await execChunk(_G, parseScript(content), moduleName))[0],
         cfg
     )
-    const loaded = libPackage.get('loaded') as Table
+    const loaded = await libPackage.get('loaded') as Table
 
-    const loadLib = (name: string, value: Table): void => {
-        _G.rawset(name, value)
-        loaded.rawset(name, value)
+    const loadLib = async (name: string, value: Table): Promise<void> => {
+        await _G.rawset(name, value)
+        await loaded.rawset(name, value)
     }
 
-    loadLib('_G', _G)
-    loadLib('package', libPackage)
-    loadLib('math', libMath)
-    loadLib('table', libTable)
-    loadLib('string', libString)
-    loadLib('os', getLibOS(cfg))
+    await loadLib('_G', _G)
+    await loadLib('package', libPackage)
+    await loadLib('math', libMath)
+    await loadLib('table', libTable)
+    await loadLib('string', libString)
+    await loadLib('os', getLibOS(cfg))
 
-    _G.rawset('require', _require)
+    await _G.rawset('require', _require)
 
     const parse = (code: string): Script => {
         const script = parseScript(code)
         return {
-            exec: () => execChunk(_G, script)[0]
+            exec: async () => (await execChunk(_G, script))[0]
         }
     }
 
-    const parseFile = (filename: string): Script => {
+    const parseFile = async (filename: string): Promise<Script> => {
         if (!cfg.fileExists) throw new LuaError('parseFile requires the config.fileExists function')
         if (!cfg.loadFile) throw new LuaError('parseFile requires the config.loadFile function')
 
         if (!cfg.fileExists(filename)) throw new LuaError('file not found')
 
-        return parse(cfg.loadFile(filename))
+        return parse(await cfg.loadFile(filename))
     }
 
     return {
@@ -111,4 +113,5 @@ function createEnv(
 
 // eslint-disable-next-line import/first
 import * as utils from './utils'
-export { createEnv, Table, LuaError, utils }
+
+export {createEnv, Table, LuaError, utils}

@@ -1,12 +1,12 @@
-import { LuaError } from './LuaError'
-import { Table } from './Table'
+import {LuaError} from './LuaError'
+import {Table} from './Table'
 
 type LuaType = undefined | boolean | number | string | Function | Table // thread | userdata
 
 interface Config {
     LUA_PATH?: string
-    fileExists?: (path: string) => boolean
-    loadFile?: (path: string) => string
+    fileExists?: (path: string) => Promise<boolean>
+    loadFile?: (path: string) => Promise<string>
     stdin?: string
     stdout?: (data: string) => void
     osExit?: (code: number) => void
@@ -37,10 +37,10 @@ function type(v: LuaType): 'string' | 'number' | 'boolean' | 'function' | 'nil' 
     }
 }
 
-function tostring(v: LuaType): string {
+async function tostring(v: LuaType): Promise<string> {
     if (v instanceof Table) {
-        const mm = v.getMetaMethod('__tostring')
-        if (mm) return mm(v)[0]
+        const mm = await v.getMetaMethod('__tostring')
+        if (mm) return (await mm(v))[0]
 
         return valToStr(v, 'table: 0x')
     }

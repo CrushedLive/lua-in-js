@@ -35,11 +35,11 @@ class MemExpr extends String {
     }
 
     public get(): string {
-        return `__lua.get(${this.base}, ${this.property})`
+        return `(await (__lua.get(${this.base}, ${this.property})))`
     }
 
     public set(value: string | MemExpr): string {
-        return `${this.base}.set(${this.property}, ${value})`
+        return `(await ${this.base}.set(${this.property}, ${value}))`
     }
 
     public setFn(): string {
@@ -151,12 +151,12 @@ const generate = (node: luaparse.Node): string | MemExpr => {
 
         case 'FunctionDeclaration': {
             const getFuncDef = (params: string[]): string => {
-                const paramStr = params.join(';\n')
+                const paramStr = params.join(';\n').concat(';\n')
                 const body = parseBody(node, paramStr)
                 const argsStr = params.length === 0 ? '' : '...args'
                 const returnStr =
                     node.body.findIndex(node => node.type === 'ReturnStatement') === -1 ? '\nreturn []' : ''
-                return `(${argsStr}) => {\n${body}${returnStr}\n}`
+                return `async (${argsStr}) => {\n${body}${returnStr}\n}`
             }
 
             const params = node.parameters.map(param => {
@@ -203,20 +203,20 @@ const generate = (node: luaparse.Node): string | MemExpr => {
                 .map((variable, index) => {
                     return `$${nodeToScope.get(variable)}.setLocal('${variable.name}', res[${index}])`
                 })
-                .join(';\n')
+                .join(';\n').concat(';\n')
 
             const body = parseBody(node, variables)
 
-            return `for (let [iterator, table, next] = ${iterators}, res = __lua.call(iterator, table, next); res[0] !== undefined; res = __lua.call(iterator, table, res[0])) {\n${body}\n}`
+            return `for (let [iterator, table, next] = ${iterators}, res = (await __lua.call(iterator, table, next)); res[0] !== undefined; res = (await __lua.call(iterator, table, res[0]))) {\n${body}\n}`
         }
 
         case 'Chunk': {
             const body = parseBody(node)
-            return `'use strict'\nconst $0 = __lua.globalScope\nlet vars\nlet vals\nlet label\n\n${body}`
+            return `return async () => {\n'use strict'\nconst $0 = __lua.globalScope\nlet vars\nlet vals\nlet label\n\n${body}\n}`
         }
 
         case 'Identifier': {
-            return `$${nodeToScope.get(node)}.get('${node.name}')`
+            return `(await ($${nodeToScope.get(node)}.get('${node.name}')))`
         }
 
         case 'StringLiteral': {
@@ -255,11 +255,11 @@ const generate = (node: luaparse.Node): string | MemExpr => {
             const fields = node.fields
                 .map((field, index, arr) => {
                     if (field.type === 'TableKey') {
-                        return `t.rawset(${generate(field.key)}, ${expression(field.value)})`
+                        return `(await t.rawset(${generate(field.key)}, ${expression(field.value)}))`
                     }
 
                     if (field.type === 'TableKeyString') {
-                        return `t.rawset('${field.key.name}', ${expression(field.value)})`
+                        return `(await t.rawset('${field.key.name}', ${expression(field.value)}))`
                     }
 
                     if (field.type === 'TableValue') {
@@ -269,9 +269,9 @@ const generate = (node: luaparse.Node): string | MemExpr => {
                         return `t.insert(${expression(field.value)})`
                     }
                 })
-                .join(';\n')
+                .join(';\n').concat(';\n')
 
-            return `new __lua.Table(t => {\n${fields}\n})`
+            return `(await (__lua.Table.from(async t => {\n${fields}\n})))`
         }
 
         case 'UnaryExpression': {
@@ -282,7 +282,7 @@ const generate = (node: luaparse.Node): string | MemExpr => {
                 throw new Error(`Unhandled unary operator: ${node.operator}`)
             }
 
-            return `__lua.${operator}(${argument})`
+            return `await __lua.${operator}(${argument})`
         }
 
         case 'BinaryExpression': {
@@ -294,7 +294,7 @@ const generate = (node: luaparse.Node): string | MemExpr => {
                 throw new Error(`Unhandled binary operator: ${node.operator}`)
             }
 
-            return `__lua.${operator}(${left}, ${right})`
+            return `await __lua.${operator}(${left}, ${right})`
         }
 
         case 'LogicalExpression': {
@@ -303,10 +303,10 @@ const generate = (node: luaparse.Node): string | MemExpr => {
             const operator = node.operator
 
             if (operator === 'and') {
-                return `__lua.and(${left},${right})`
+                return `await __lua.and(${left},${right})`
             }
             if (operator === 'or') {
-                return `__lua.or(${left},${right})`
+                return `await __lua.or(${left},${right})`
             }
             throw new Error(`Unhandled logical operator: ${node.operator}`)
         }
@@ -331,10 +331,10 @@ const generate = (node: luaparse.Node): string | MemExpr => {
                     : expression(node.type === 'TableCallExpression' ? node.arguments : node.argument)
 
             if (functionName instanceof MemExpr && node.base.type === 'MemberExpression' && node.base.indexer === ':') {
-                return `__lua.call(${functionName}, ${functionName.base}, ${args})`
+                return `(await (__lua.call(${functionName}, ${functionName.base}, ${args})))`
             }
 
-            return `__lua.call(${functionName}, ${args})`
+            return `(await (__lua.call(${functionName}, ${args})))`
         }
 
         default:
@@ -346,7 +346,7 @@ const parseBody = (node: Block, header = ''): string => {
     const scope = nodeToScope.get(node)
     const scopeDef = scope === undefined ? '' : `const $${scope} = $${scopeToParentScope.get(scope)}.extend();`
 
-    const body = node.body.map(statement => generate(statement)).join(';\n')
+    const body = node.body.map(statement => generate(statement)).join(';\n').concat(';\n')
 
     const goto = nodeToGoto.get(node)
     if (goto === undefined) return `${scopeDef}\n${header}\n${body}`

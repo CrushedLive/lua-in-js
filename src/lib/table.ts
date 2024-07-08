@@ -1,4 +1,4 @@
-import { Table } from '../Table'
+import {Table} from '../Table'
 import {
     LuaType,
     coerceToBoolean,
@@ -7,7 +7,7 @@ import {
     coerceArgToTable,
     coerceArgToFunction
 } from '../utils'
-import { LuaError } from '../LuaError'
+import {LuaError} from '../LuaError'
 
 function getn(table: LuaType): number {
     const TABLE = coerceArgToTable(table, 'getn', 1)
@@ -35,13 +35,13 @@ function concat(table: LuaType, sep: LuaType = '', i: LuaType = 1, j?: LuaType):
  * Inserts element value at position pos in list, shifting up the elements list[pos], list[pos+1], ···, list[#list].
  * The default value for pos is #list+1, so that a call table.insert(t,x) inserts x at the end of list t.
  */
-function insert(table: LuaType, pos: LuaType, value?: LuaType): void {
+async function insert(table: LuaType, pos: LuaType, value?: LuaType): Promise<void> {
     const TABLE = coerceArgToTable(table, 'insert', 1)
     const POS = value === undefined ? TABLE.numValues.length : coerceArgToNumber(pos, 'insert', 2)
     const VALUE = value === undefined ? pos : value
 
     TABLE.numValues.splice(POS, 0, undefined)
-    TABLE.set(POS, VALUE)
+    await TABLE.set(POS, VALUE)
 }
 
 function maxn(table: LuaType): number {
@@ -60,7 +60,7 @@ function maxn(table: LuaType): number {
  *
  * Returns the destination table a2.
  */
-function move(a1: LuaType, f: LuaType, e: LuaType, t: LuaType, a2?: LuaType): Table {
+async function move(a1: LuaType, f: LuaType, e: LuaType, t: LuaType, a2?: LuaType): Promise<Table> {
     const A1 = coerceArgToTable(a1, 'move', 1)
     const F = coerceArgToNumber(f, 'move', 2)
     const E = coerceArgToNumber(e, 'move', 3)
@@ -74,13 +74,13 @@ function move(a1: LuaType, f: LuaType, e: LuaType, t: LuaType, a2?: LuaType): Ta
 
         if (T > E || T <= F || A2 !== A1) {
             for (let i = 0; i < n; i++) {
-                const v = A1.get(F + i)
-                A2.set(T + i, v)
+                const v = await A1.get(F + i)
+                await A2.set(T + i, v)
             }
         } else {
             for (let i = n - 1; i >= 0; i--) {
-                const v = A1.get(F + i)
-                A2.set(T + i, v)
+                const v = await A1.get(F + i)
+                await A2.set(T + i, v)
             }
         }
     }
@@ -92,9 +92,9 @@ function move(a1: LuaType, f: LuaType, e: LuaType, t: LuaType, a2?: LuaType): Ta
  * Returns a new table with all arguments stored into keys 1, 2, etc. and with a field "n" with the total number of arguments.
  * Note that the resulting table may not be a sequence.
  */
-function pack(...args: LuaType[]): Table {
+async function pack(...args: LuaType[]): Promise<Table> {
     const table = new Table(args)
-    table.rawset('n', args.length)
+    await table.rawset('n', args.length)
     return table
 }
 
@@ -140,21 +140,45 @@ function remove(table: LuaType, pos?: LuaType): LuaType {
  * The sort algorithm is not stable: elements considered equal by the given order may have
  * their relative positions changed by the sort.
  */
-function sort(table: Table, comp?: Function): void {
+async function sort(table: Table, comp?: Function): Promise<void> {
     const TABLE = coerceArgToTable(table, 'sort', 1)
 
-    let sortFunc: (a: LuaType, b: LuaType) => number
+    let sortFunc: (a: LuaType, b: LuaType) => Promise<number>
 
     if (comp) {
         const COMP = coerceArgToFunction(comp, 'sort', 2)
-        sortFunc = (a, b) => (coerceToBoolean(COMP(a, b)[0]) ? -1 : 1)
+        sortFunc = async (a, b) => (coerceToBoolean((await COMP(a, b))[0]) ? -1 : 1)
     } else {
-        sortFunc = (a, b) => (a < b ? -1 : 1)
+        sortFunc = async (a, b) => (a < b ? -1 : 1)
     }
 
-    const arr = TABLE.numValues
-    arr.shift()
-    arr.sort(sortFunc).unshift(undefined)
+    const arr = TABLE.numValues.slice(1),
+        checks: { [key: string]: any } = {}
+
+    for (let a of arr) {
+        for (let b of arr) {
+            if (a !== b) {
+                const aKey = JSON.stringify(a),
+                    bKey = JSON.stringify(b),
+                    key = `${aKey}:${bKey}`
+
+                if (!(key in checks)) {
+                    checks[key] = await sortFunc(a, b)
+                }
+            }
+        }
+    }
+
+    TABLE.numValues.shift()
+    TABLE.numValues.sort((a, b) => {
+        const aKey = JSON.stringify(a),
+            bKey = JSON.stringify(b),
+            key = `${aKey}:${bKey}`,
+            check = checks[key]
+
+        if (check === undefined) return 0
+        return check
+    }).unshift(undefined)
 }
 
 /**
@@ -184,4 +208,4 @@ const libTable = new Table({
     unpack
 })
 
-export { libTable }
+export {libTable}

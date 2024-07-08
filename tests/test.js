@@ -2,49 +2,56 @@ const fs = require('fs')
 const path = require('path')
 const luainjs = require('..')
 
-let exitCode = 0
-
-{
+const starlight = async () => {
+    console.debug('---- STARLIGHT ----')
     const rootPath = './tests/starlight/'
-    const luaEnv = luainjs.createEnv({
+    const luaEnv = await luainjs.createEnv({
         fileExists: p => fs.existsSync(path.join(rootPath, p)),
-        loadFile: p => fs.readFileSync(path.join(rootPath, p), { encoding: 'utf8' }),
-        osExit: code => (exitCode += code)
+        loadFile: p => fs.readFileSync(path.join(rootPath, p), {encoding: 'utf8'}),
+        osExit: code => code && process.exit(code)
     })
-    luaEnv.parseFile('test-runner.lua').exec()
+    console.log(await (await luaEnv.parseFile('test-runner.lua')).exec())
+    console.debug('---- /STARLIGHT ----')
 }
 
 // TODO: make more official lua 5.3 tests pass (most of them don't pass because they `require "debug"`)
-{
+const fivethree = async () => {
+    console.debug('---- FIVETHREE ----')
     const rootPath = './tests/lua-5.3/'
-    const luaEnv = luainjs.createEnv({
+    const luaEnv = await luainjs.createEnv({
         fileExists: p => fs.existsSync(path.join(rootPath, p)),
-        loadFile: p => fs.readFileSync(path.join(rootPath, p), { encoding: 'utf8' }),
+        loadFile: p => fs.readFileSync(path.join(rootPath, p), {encoding: 'utf8'}),
         osExit: code => process.exit(code)
     })
-    luaEnv.parseFile('goto.lua').exec()
-    luaEnv.parseFile('bwcoercion.lua').exec()
+    console.log(await (await luaEnv.parseFile('goto.lua')).exec())
+    console.log(await (await luaEnv.parseFile('bwcoercion.lua')).exec())
+    console.debug('---- /FIVETHREE ----')
 }
 
-{
-    const luaEnv = luainjs.createEnv()
+const inline = async () => {
+    console.debug('---- INLINE ----')
+    const luaEnv = await luainjs.createEnv()
+
     function helloBuilder(name) {
         const NAME = luainjs.utils.coerceArgToString(name, 'sayHi', 1)
         return `Hello ${NAME}!`
     }
-    const myLib = new luainjs.Table({ helloBuilder })
-    luaEnv.loadLib('myLib', myLib)
-    const str = luaEnv.parse(`return myLib.helloBuilder('John')`).exec()
+
+    const myLib = new luainjs.Table({helloBuilder})
+    await luaEnv.loadLib('myLib', myLib)
+    const str = await luaEnv.parse(`return myLib.helloBuilder('John')`).exec()
     if (str !== 'Hello John!') {
         throw Error("Strings don't match!")
     }
+    console.debug('---- /INLINE ----')
 }
 
-{
-    const luaEnv = luainjs.createEnv()
+const backticks = async () => {
+    console.debug('---- BACKTICKS ----')
+    const luaEnv = await luainjs.createEnv()
     let str
     try {
-        str = luaEnv.parse('return "Backtick `literals` in strings work"').exec()
+        str = await luaEnv.parse('return "Backtick `literals` in strings work"').exec()
     } catch (e) {
         throw Error('Backticks in strings transpile into invalid code!')
     }
@@ -53,4 +60,13 @@ let exitCode = 0
     }
 }
 
-process.exit(exitCode)
+(async () => {
+    try {
+        await starlight()
+        await fivethree()
+        await inline()
+        await backticks()
+    } catch (e) {
+        console.error(e)
+    }
+})()

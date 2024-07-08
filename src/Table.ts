@@ -1,7 +1,7 @@
-import { hasOwnProperty, LuaType, tostring } from './utils'
+import {hasOwnProperty, LuaType, tostring} from './utils'
 
 type MetaMethods =
-    // unary op
+// unary op
     | '__unm'
     | '__bnot'
     | '__len'
@@ -36,14 +36,8 @@ class Table {
     public keys: string[] = []
     public values: LuaType[] = []
     public metatable: Table | null = null
-    public constructor(initialiser?: Record<string, LuaType> | LuaType[] | ((t: Table) => void)) {
-        if (initialiser === undefined) return
 
-        if (typeof initialiser === 'function') {
-            initialiser(this)
-            return
-        }
-
+    public constructor(initialiser?: Record<string, LuaType> | LuaType[]) {
         if (Array.isArray(initialiser)) {
             this.insert(...initialiser)
             return
@@ -53,23 +47,47 @@ class Table {
             if (hasOwnProperty(initialiser, key)) {
                 let value = initialiser[key]
                 if (value === null) value = undefined
-                this.set(key, value)
+                this._rawset(key, value)
             }
         }
     }
 
-    public get(key: LuaType): LuaType {
-        const value = this.rawget(key)
+    public static async from(initialiser?: Record<string, LuaType> | LuaType[] | ((t: Table) => void)): Promise<Table> {
+        const instance = new Table()
+        if (initialiser === undefined) return instance
+
+        if (typeof initialiser === 'function') {
+            await initialiser(instance)
+            return instance
+        }
+
+        if (Array.isArray(initialiser)) {
+            instance.insert(...initialiser)
+            return instance
+        }
+
+        for (const key in initialiser) {
+            if (hasOwnProperty(initialiser, key)) {
+                let value = initialiser[key]
+                if (value === null) value = undefined
+                await instance.rawset(key, value)
+            }
+        }
+        return instance
+    }
+
+    public async get(key: LuaType): Promise<LuaType> {
+        const value = await this.rawget(key)
 
         if (value === undefined && this.metatable) {
-            const mm = this.metatable.get('__index') as Table | Function
+            const mm = await this.metatable.get('__index') as Table | Function
 
             if (mm instanceof Table) {
-                return mm.get(key)
+                return await mm.get(key)
             }
 
             if (typeof mm === 'function') {
-                const v = mm.call(undefined, this, key)
+                const v = await mm.call(undefined, this, key)
                 return v instanceof Array ? v[0] : v
             }
         }
@@ -77,7 +95,7 @@ class Table {
         return value
     }
 
-    public rawget(key: LuaType): LuaType {
+    public async rawget(key: LuaType): Promise<LuaType> {
         switch (typeof key) {
             case 'string':
                 if (hasOwnProperty(this.strValues, key)) {
@@ -90,37 +108,51 @@ class Table {
                 }
         }
 
-        const index = this.keys.indexOf(tostring(key))
+        const index = this.keys.indexOf(await tostring(key))
         return index === -1 ? undefined : this.values[index]
     }
 
-    public getMetaMethod(name: MetaMethods): Function {
-        return this.metatable && (this.metatable.rawget(name) as Function)
+    public async getMetaMethod(name: MetaMethods): Promise<Function> {
+        return this.metatable && await (this.metatable.rawget(name) as Promise<Function>)
     }
 
-    public set(key: LuaType, value: LuaType): LuaType {
-        const mm = this.metatable && this.metatable.get('__newindex')
+    public async set(key: LuaType, value: LuaType): Promise<LuaType> {
+        const mm = this.metatable && await this.metatable.get('__newindex')
         if (mm) {
-            const oldValue = this.rawget(key)
+            const oldValue = await this.rawget(key)
 
             if (oldValue === undefined) {
                 if (mm instanceof Table) {
-                    return mm.set(key, value)
+                    return await mm.set(key, value)
                 }
                 if (typeof mm === 'function') {
-                    return mm(this, key, value)
+                    return await mm(this, key, value)
                 }
             }
         }
 
-        this.rawset(key, value)
+        await this.rawset(key, value)
     }
 
-    public setFn(key: string): (v: LuaType) => void {
+    public setFn(key: string): (v: LuaType) => Promise<LuaType> {
         return v => this.set(key, v)
     }
 
-    public rawset(key: LuaType, value: LuaType): void {
+    private _rawset(key: LuaType, value: LuaType) {
+        switch (typeof key) {
+            case 'string':
+                this.strValues[key] = value
+                return
+
+            case 'number':
+                if (key > 0 && key % 1 === 0) {
+                    this.numValues[key] = value
+                    return
+                }
+        }
+    }
+
+    public async rawset(key: LuaType, value: LuaType): Promise<void> {
         switch (typeof key) {
             case 'string':
                 this.strValues[key] = value
@@ -133,7 +165,7 @@ class Table {
                 }
         }
 
-        const K = tostring(key)
+        const K = await tostring(key)
         const index = this.keys.indexOf(K)
         if (index > -1) {
             this.values[index] = value
@@ -215,4 +247,4 @@ class Table {
     }
 }
 
-export { MetaMethods, Table }
+export {MetaMethods, Table}

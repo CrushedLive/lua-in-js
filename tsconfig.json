@@ -6,10 +6,10 @@
         "outDir": "dist",
         "declarationDir": "dist/types",
 
-        "target": "es6",
-        "module": "es2015",
+        "target": "esnext",
+        "module": "esnext",
         "moduleResolution": "node",
-        "lib": ["es6", "dom"],
+        "lib": ["esnext", "dom"],
 
         "pretty": true,
 

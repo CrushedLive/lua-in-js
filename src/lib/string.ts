@@ -1,7 +1,7 @@
-import { sprintf } from 'printj'
-import { Table } from '../Table'
-import { LuaError } from '../LuaError'
-import { tostring, posrelat, coerceArgToNumber, coerceArgToString, hasOwnProperty, LuaType } from '../utils'
+import {sprintf} from 'printj'
+import {Table} from '../Table'
+import {LuaError} from '../LuaError'
+import {tostring, posrelat, coerceArgToNumber, coerceArgToString, hasOwnProperty, LuaType} from '../utils'
 
 const ROSETTA_STONE: Record<string, string> = {
     '([^a-zA-Z0-9%(])-': '$1*?',
@@ -138,47 +138,56 @@ function find(s: LuaType, pattern: LuaType, init: LuaType, plain: LuaType): (num
     return index === -1 ? undefined : [index + 1, index + P.length]
 }
 
-function format(formatstring: string, ...args: LuaType[]): string {
+async function format(formatstring: string, ...args: LuaType[]): Promise<string> {
     // Pattern with all constraints:
     // /%%|%([-+ #0]{0,5})?(\d{0,2})?(?:\.(\d{0,2}))?([AEGXacdefgioqsux])/g
-    const PATTERN = /%%|%([-+ #0]*)?(\d*)?(?:\.(\d*))?(.)/g
+    const PATTERN = /%%|%([-+ #0]*)?(\d*)?(\.\d*)?(.)/,
+        parts = formatstring.split(PATTERN)
+    let result = parts.shift()
 
-    let i = -1
-    return formatstring.replace(PATTERN, (format, flags, width, precision, modifier) => {
-        if (format === '%%') return '%'
-        if (!modifier.match(/[AEGXacdefgioqsux]/)) {
-            throw new LuaError(`invalid option '%${format}' to 'format'`)
-        }
-        if (flags && flags.length > 5) {
-            throw new LuaError(`invalid format (repeated flags)`)
-        }
-        if (width && width.length > 2) {
-            throw new LuaError(`invalid format (width too long)`)
-        }
-        if (precision && precision.length > 2) {
-            throw new LuaError(`invalid format (precision too long)`)
+    for (let i = 0; i < (parts.length / 5); i++) {
+        const o = i * 5,
+            [flags, width, precision, modifier, tail] = parts.slice(o, o + 5),
+            format = `%${parts.slice(o, o + 4).filter(Boolean).join('')}`
+        
+        if (modifier === undefined) {
+            result += `%${tail}`
+            break
         }
 
-        i += 1
+        switch (true) {
+            case !modifier.match(/[AEGXacdefgioqsux]/):
+                throw new LuaError(`invalid option '${format}' to 'format'`)
+            case flags && flags.length > 5:
+                throw new LuaError(`invalid format (repeated flags)`)
+            case width && width.length > 2:
+                throw new LuaError(`invalid format (width too long)`)
+            case precision && precision.length > 3:
+                throw new LuaError(`invalid format (precision too long)`)
+        }
+
         const arg = args[i]
-        if (arg === undefined) {
-            throw new LuaError(`bad argument #${i} to 'format' (no value)`)
-        }
-        if (/A|a|E|e|f|G|g/.test(modifier)) {
-            return sprintf(format, coerceArgToNumber(arg, 'format', i))
-        }
-        if (/c|d|i|o|u|X|x/.test(modifier)) {
-            return sprintf(format, coerceArgToNumber(arg, 'format', i))
+        switch (true) {
+            case arg === undefined:
+                throw new LuaError(`bad argument #${i} to 'format' (no value)`)
+            case /[AaEefGg]/.test(modifier):
+            case /[cdiouXx]/.test(modifier):
+                result += sprintf(format, coerceArgToNumber(arg, 'format', i))
+                break
+            case /q/.test(modifier):
+                result += `"${(arg as string).replace(/([\n"])/g, '\\$1')}"`
+                break
+            case /s/.test(modifier):
+                result += sprintf(format, await tostring(arg))
+                break
+            default:
+                result += sprintf(format, arg)
         }
 
-        if (modifier === 'q') {
-            return `"${(arg as string).replace(/([\n"])/g, '\\$1')}"`
-        }
-        if (modifier === 's') {
-            return sprintf(format, tostring(arg))
-        }
-        return sprintf(format, arg)
-    })
+        result += tail
+    }
+
+    return result
 }
 
 /**
@@ -223,21 +232,21 @@ function gmatch(s: LuaType, pattern: LuaType): () => string[] {
  * then it is used as the replacement string; otherwise, if it is false or nil, then there is no replacement
  * (that is, the original match is kept in the string).
  */
-function gsub(s: LuaType, pattern: LuaType, repl: LuaType, n?: LuaType): string {
+async function gsub(s: LuaType, pattern: LuaType, repl: LuaType, n?: LuaType): Promise<string> {
     let S = coerceArgToString(s, 'gsub', 1)
     const N = n === undefined ? Infinity : coerceArgToNumber(n, 'gsub', 3)
     const P = translatePattern(coerceArgToString(pattern, 'gsub', 2))
 
-    const REPL = ((): ((strs: string[]) => string) => {
+    const REPL = ((): ((strs: string[]) => Promise<string>) => {
         if (typeof repl === 'function')
-            return strs => {
-                const ret = repl(strs[0])[0]
+            return async strs => {
+                const ret = (await repl(strs[0]))[0]
                 return ret === undefined ? strs[0] : ret
             }
 
-        if (repl instanceof Table) return strs => repl.get(strs[0]).toString()
+        if (repl instanceof Table) return async strs => (await repl.get(strs[0])).toString()
 
-        return strs => `${repl}`.replace(/%([0-9])/g, (_, i) => strs[i])
+        return async strs => `${repl}`.replace(/%([0-9])/g, (_, i) => strs[i])
     })()
 
     let result = ''
@@ -250,7 +259,7 @@ function gsub(s: LuaType, pattern: LuaType, repl: LuaType, n?: LuaType): string 
             match[0].length > 0 ? S.substr(0, match.index) : lastMatch === undefined ? '' : S.substr(0, 1)
 
         lastMatch = match[0]
-        result += `${prefix}${REPL(match)}`
+        result += `${prefix}${await REPL(match)}`
         S = S.substr(`${prefix}${lastMatch}`.length)
 
         count += 1
@@ -373,6 +382,6 @@ const libString = new Table({
     upper
 })
 
-const metatable = new Table({ __index: libString })
+const metatable = new Table({__index: libString})
 
-export { libString, metatable }
+export {libString, metatable}

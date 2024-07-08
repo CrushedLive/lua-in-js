@@ -1,6 +1,6 @@
-import { parse } from '../parser'
-import { Table } from '../Table'
-import { LuaError } from '../LuaError'
+import {parse} from '../parser'
+import {Table} from '../Table'
+import {LuaError} from '../LuaError'
 import {
     LuaType,
     Config,
@@ -15,7 +15,7 @@ import {
     coerceArgToTable,
     hasOwnProperty
 } from '../utils'
-import { metatable as stringMetatable } from './string'
+import {metatable as stringMetatable} from './string'
 
 const CHARS = '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 
@@ -55,9 +55,9 @@ function error(message: LuaType): void {
  * Otherwise, if the object's metatable has a __metatable field, returns the associated value.
  * Otherwise, returns the metatable of the given object.
  */
-function getmetatable(table: LuaType): Table {
+async function getmetatable(table: LuaType): Promise<Table> {
     if (table instanceof Table && table.metatable) {
-        const mm = table.metatable.rawget('__metatable') as Table
+        const mm = (await table.metatable.rawget('__metatable')) as Table
         return mm ? mm : table.metatable
     }
     if (typeof table === 'string') {
@@ -72,9 +72,9 @@ function getmetatable(table: LuaType): Table {
  *
  * will iterate over the key–value pairs (1,t[1]), (2,t[2]), ..., up to the first nil value.
  */
-function ipairs(t: LuaType): [Function, Table, number] {
+async function ipairs(t: LuaType): Promise<[Function, Table, number]> {
     const table = coerceArgToTable(t, 'ipairs', 1)
-    const mm = table.getMetaMethod('__pairs') || table.getMetaMethod('__ipairs')
+    const mm = await (table.getMetaMethod('__pairs') || table.getMetaMethod('__ipairs'))
     return mm ? mm(table).slice(0, 3) : [ipairsIterator, table, 0]
 }
 
@@ -155,9 +155,9 @@ function next(table: LuaType, index?: LuaType): [number | string, LuaType] {
  *
  * See function next for the caveats of modifying the table during its traversal.
  */
-function pairs(t: LuaType): [Function, Table, undefined] {
+async function pairs(t: LuaType): Promise<[Function, Table, undefined]> {
     const table = coerceArgToTable(t, 'pairs', 1)
-    const mm = table.getMetaMethod('__pairs')
+    const mm = await table.getMetaMethod('__pairs')
     return mm ? mm(table).slice(0, 3) : [next, table, undefined]
 }
 
@@ -169,13 +169,13 @@ function pairs(t: LuaType): [Function, Table, undefined] {
  * In such case, pcall also returns all results from the call, after this first result.
  * In case of any error, pcall returns false plus the error message.
  */
-function pcall(f: LuaType, ...args: LuaType[]): [false, string] | [true, ...LuaType[]] {
+async function pcall(f: LuaType, ...args: LuaType[]): Promise<[false, string] | [true, ...LuaType[]]> {
     if (typeof f !== 'function') {
         throw new LuaError('Attempt to call non-function')
     }
 
     try {
-        return [true, ...f(...args)]
+        return [true, ...await f(...args)]
     } catch (e) {
         return [false, e && e.toString()]
     }
@@ -192,7 +192,7 @@ function rawequal(v1: LuaType, v2: LuaType): boolean {
  * Gets the real value of table[index], without invoking the __index metamethod.
  * table must be a table; index may be any value.
  */
-function rawget(table: LuaType, index: LuaType): LuaType {
+function rawget(table: LuaType, index: LuaType): Promise<LuaType> {
     const TABLE = coerceArgToTable(table, 'rawget', 1)
     return TABLE.rawget(index)
 }
@@ -215,11 +215,11 @@ function rawlen(v: LuaType): number {
  *
  * This function returns table.
  */
-function rawset(table: LuaType, index: LuaType, value: LuaType): Table {
+async function rawset(table: LuaType, index: LuaType, value: LuaType): Promise<Table> {
     const TABLE = coerceArgToTable(table, 'rawset', 1)
     if (index === undefined) throw new LuaError('table index is nil')
 
-    TABLE.rawset(index, value)
+    await TABLE.rawset(index, value)
     return TABLE
 }
 
@@ -249,14 +249,14 @@ function select(index: number | '#', ...args: LuaType[]): LuaType[] | number {
  *
  * This function returns table.
  */
-function setmetatable(table: LuaType, metatable: LuaType): Table {
+async function setmetatable(table: LuaType, metatable: LuaType): Promise<Table> {
     const TABLE = coerceArgToTable(table, 'setmetatable', 1)
 
-    if (TABLE.metatable && TABLE.metatable.rawget('__metatable')) {
+    if (TABLE.metatable && await TABLE.metatable.rawget('__metatable')) {
         throw new LuaError('cannot change a protected metatable')
     }
 
-    TABLE.metatable = metatable === null || metatable === undefined ? null : coerceArgToTable(metatable, 'setmetatable', 2) 
+    TABLE.metatable = metatable === null || metatable === undefined ? null : coerceArgToTable(metatable, 'setmetatable', 2)
     return TABLE
 }
 
@@ -299,36 +299,37 @@ function tonumber(e: LuaType, base: LuaType): number {
 /**
  * This function is similar to pcall, except that it sets a new message handler msgh.
  */
-function xpcall(f: LuaType, msgh: LuaType, ...args: LuaType[]): [false, string] | [true, ...LuaType[]] {
+async function xpcall(f: LuaType, msgh: LuaType, ...args: LuaType[]): Promise<[false, string] | [true, ...LuaType[]]> {
     if (typeof f !== 'function' || typeof msgh !== 'function') {
         throw new LuaError('Attempt to call non-function')
     }
 
     try {
-        return [true, ...f(...args)]
+        return [true, ...await f(...args)]
     } catch (e) {
-        return [false, msgh(e)[0]]
+        return [false, (await msgh(e))[0]]
     }
 }
 
-function createG(cfg: Config, execChunk: (_G: Table, chunk: string) => LuaType[]): Table {
+async function createG(cfg: Config, execChunk: (_G: Table, chunk: string) => Promise<LuaType[]>): Promise<Table> {
     function print(...args: LuaType[]): void {
-        const output = args.map(arg => tostring(arg)).join('\t')
-        cfg.stdout(output)
+        console.log(...args)
+        // const output = args.map(arg => tostring(arg)).join('\t')
+        // cfg.stdout(output)
     }
 
-    function load(
+    async function load(
         chunk: LuaType,
         _chunkname?: string,
         _mode?: 'b' | 't' | 'bt',
         env?: Table
-    ): [undefined, string] | (() => LuaType[]) {
+    ): Promise<[undefined, string] | (() => Promise<LuaType[]>)> {
         let C = ''
         if (chunk instanceof Function) {
             let ret = ' '
             while (ret !== '' && ret !== undefined) {
                 C += ret
-                ret = chunk()[0]
+                ret = (await chunk())[0]
             }
         } else {
             C = coerceArgToString(chunk, 'load', 1)
@@ -344,35 +345,35 @@ function createG(cfg: Config, execChunk: (_G: Table, chunk: string) => LuaType[]
         return () => execChunk(env || _G, parsed)
     }
 
-    function dofile(filename?: LuaType): LuaType[] {
-        const res = loadfile(filename)
+    async function dofile(filename?: LuaType): Promise<LuaType[]> {
+        const res = await loadfile(filename)
 
         if (Array.isArray(res) && res[0] === undefined) {
             throw new LuaError(res[1])
         }
 
-        const exec = res as () => LuaType[]
-        return exec()
+        const exec = res as () => Promise<LuaType[]>
+        return await exec()
     }
 
-    function loadfile(
+    async function loadfile(
         filename?: LuaType,
         mode?: 'b' | 't' | 'bt',
         env?: Table
-    ): [undefined, string] | (() => LuaType[]) {
+    ): Promise<[undefined, string] | (() => Promise<LuaType[]>)> {
         const FILENAME = filename === undefined ? cfg.stdin : coerceArgToString(filename, 'loadfile', 1)
 
         if (!cfg.fileExists) {
             throw new LuaError('loadfile requires the config.fileExists function')
         }
 
-        if (!cfg.fileExists(FILENAME)) return [undefined, 'file not found']
+        if (!(await cfg.fileExists(FILENAME))) return [undefined, 'file not found']
 
         if (!cfg.loadFile) {
             throw new LuaError('loadfile requires the config.loadFile function')
         }
 
-        return load(cfg.loadFile(FILENAME), FILENAME, mode, env)
+        return await load(await cfg.loadFile(FILENAME), FILENAME, mode, env)
     }
 
     const _G = new Table({
@@ -404,4 +405,4 @@ function createG(cfg: Config, execChunk: (_G: Table, chunk: string) => LuaType[]
     return _G
 }
 
-export { tostring, createG }
+export {tostring, createG}
